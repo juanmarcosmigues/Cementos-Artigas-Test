@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>Unity WebGL — Embedded Mobile (Fullscreen = Landscape)</title>
+  <title>Unity WebGL — Embedded + Fullscreen Letterbox 16:9</title>
   <style>
     :root { --bg: #0f0f12; --maxw: 900px; }
     html, body { margin:0; background: var(--bg); color:#e9e9ee; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans'; }
@@ -12,28 +12,37 @@
       min-height: 100dvh; box-sizing: border-box;
     }
     .blurb { max-width: var(--maxw); opacity:.8; font-size: .95rem; }
-    .unity-shell {
-      width: 100%; max-width: var(--maxw);
-    }
+    .unity-shell { width: 100%; max-width: var(--maxw); }
     .unity-container {
       position: relative;
       width: 100%;
-      aspect-ratio: 16/9;
+      aspect-ratio: 16/9;          /* Embedded: fixed 16:9 box */
       background: #000;
       border-radius: 14px;
-      overflow: clip;
+      overflow: hidden;
       box-shadow: 0 8px 40px rgba(0,0,0,.35);
+      display: grid;
+      place-items: center;
+    }
+    .unity-stage {                  /* The element we size explicitly (esp. in fullscreen) */
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      background: #000;             /* Letterbox bars */
     }
     #unity-canvas {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%; display: block;
-      outline: none;
+      display: block;
+      width: 100%;
+      height: 100%;
       touch-action: none;
       -webkit-user-select: none; user-select: none;
+      outline: none;
+      background: #000;
     }
     .progress {
-      position:absolute; inset:0;
-      display:grid; place-items:center;
+      position:absolute; inset:0; display:grid; place-items:center;
     }
     .progress[hidden]{ display:none; }
     .toolbar {
@@ -45,7 +54,7 @@
     }
     .small { opacity:.7; font-size:.9rem; }
 
-    /* Fullscreen rotate fallback overlay */
+    /* Fullscreen rotate hint overlay */
     .rotate-overlay {
       position: fixed; inset: 0; display: none;
       align-items: center; justify-content: center; text-align: center;
@@ -55,21 +64,30 @@
     .rotate-card { max-width: 420px; }
     .rotate-card h2 { margin: 0 0 8px 0; font-size: 1.1rem; }
     .rotate-card p { margin: 0; opacity:.85; }
+
+    /* Fullscreen tweaks: container fills viewport; we keep 16:9 by sizing .unity-stage via JS */
+    :fullscreen .unity-container,
+    :-webkit-full-screen .unity-container {
+      border-radius: 0;
+      aspect-ratio: auto; /* Let it stretch; we'll center/fit the 16:9 stage inside */
+    }
   </style>
 </head>
 <body>
   <div class="page">
     <div class="blurb">
-      <strong>Embedded demo (mobile-friendly):</strong> sits inside the page. If the user taps <em>Fullscreen</em>, we request fullscreen and lock to landscape (where supported). If not supported, we show a rotate hint overlay.
+      <strong>Embedded 16:9:</strong> Stays embedded with fixed 16:9. On <em>Fullscreen</em>, it remains 16:9 and adds letterboxing/pillarboxing to fit any screen. Orientation lock attempted on supported browsers.
     </div>
 
     <div class="unity-shell">
       <div class="unity-container" id="unity-container">
-        <canvas id="unity-canvas" tabindex="0"></canvas>
-        <div id="progress" class="progress">Loading… 0%</div>
+        <div class="unity-stage" id="unity-stage">
+          <canvas id="unity-canvas" tabindex="0"></canvas>
+          <div id="progress" class="progress">Loading… 0%</div>
+        </div>
       </div>
       <div class="toolbar">
-        <div class="small">Canvas is embedded (not fullscreen) by default.</div>
+        <div class="small">Embedded by default. Fullscreen keeps 16:9 letterboxed.</div>
         <div>
           <button id="btn-audio">Enable Audio</button>
           <button id="btn-fullscreen">Fullscreen</button>
@@ -102,11 +120,14 @@
     };
 
     const container = document.getElementById("unity-container");
+    const stage = document.getElementById("unity-stage");
     const canvas = document.getElementById("unity-canvas");
     const progressEl = document.getElementById("progress");
     const fsBtn = document.getElementById("btn-fullscreen");
     const audioBtn = document.getElementById("btn-audio");
     const rotateOverlay = document.getElementById("rotate-overlay");
+
+    const TARGET_ASPECT = 16/9;
 
     // iOS/Android audio policy: resume AudioContext on a user gesture
     function resumeAudio() {
@@ -119,24 +140,17 @@
       } catch (e) { /* ignore */ }
     }
 
-    // Utilities for fullscreen
+    // Fullscreen helpers
     function enterFullscreen(el) {
       if (el.requestFullscreen) return el.requestFullscreen();
       if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
       if (el.msRequestFullscreen) return el.msRequestFullscreen();
       return Promise.reject(new Error("Fullscreen API not supported"));
     }
-    function exitFullscreen() {
-      if (document.exitFullscreen) return document.exitFullscreen();
-      if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
-      if (document.msExitFullscreen) return document.msExitFullscreen();
-      return Promise.resolve();
-    }
     function isFullscreen() {
       return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
     }
 
-    // Try to lock landscape after entering fullscreen (where supported)
     async function lockLandscapeIfPossible() {
       const so = screen.orientation;
       if (so && so.lock) {
@@ -144,28 +158,43 @@
           await so.lock('landscape');
           return true;
         } catch (e) {
-          // Lock failed (likely unsupported on iOS Safari or user settings)
           return false;
         }
       }
       return false;
     }
 
-    // Show/hide rotate overlay based on current orientation while fullscreen
     function updateRotateOverlay() {
       const inFs = isFullscreen();
       const isLandscape = window.matchMedia('(orientation: landscape)').matches;
       rotateOverlay.classList.toggle('active', inFs && !isLandscape);
     }
 
-    // Listen for fullscreen & orientation changes
-    ['fullscreenchange','webkitfullscreenchange','msfullscreenchange'].forEach(ev =>
-      document.addEventListener(ev, updateRotateOverlay)
-    );
-    if (screen.orientation && screen.orientation.addEventListener) {
-      screen.orientation.addEventListener('change', updateRotateOverlay);
+    // Size the 16:9 stage to "contain" inside its container (letterbox)
+    function fitStageToContainer() {
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      const containerAspect = cw / ch;
+      let w, h;
+      if (containerAspect > TARGET_ASPECT) {
+        h = ch;
+        w = Math.round(h * TARGET_ASPECT);
+      } else {
+        w = cw;
+        h = Math.round(w / TARGET_ASPECT);
+      }
+      stage.style.width = w + "px";
+      stage.style.height = h + "px";
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
     }
-    window.addEventListener('resize', updateRotateOverlay);
+
+    ['resize','orientationchange','fullscreenchange','webkitfullscreenchange','msfullscreenchange'].forEach(ev => {
+      window.addEventListener(ev, () => {
+        fitStageToContainer();
+        updateRotateOverlay();
+      });
+    });
 
     // Boot Unity
     const script = document.createElement("script");
@@ -176,24 +205,20 @@
       }).then((unityInstance) => {
         progressEl.hidden = true;
         window.unityInstance = unityInstance;
+        fitStageToContainer(); // initial
 
-        // Fullscreen button: enter FS, then try to lock landscape
         fsBtn.onclick = async () => {
           resumeAudio();
           try {
-            // Prefer letting Unity manage fullscreen if available;
-            // however, we also request FS on the container so we can catch events/lock orientation.
             await enterFullscreen(container);
           } catch (e) {
-            // Fallback: try Unity's own path
             if (unityInstance.SetFullscreen) unityInstance.SetFullscreen(1);
           }
-          const locked = await lockLandscapeIfPossible();
-          // If not locked and device is portrait, show hint overlay
+          await lockLandscapeIfPossible();
+          fitStageToContainer();
           updateRotateOverlay();
         };
 
-        // Audio button for iOS first-gesture unlocks
         audioBtn.onclick = () => resumeAudio();
       }).catch((err) => {
         progressEl.textContent = "Failed to load: " + err;
