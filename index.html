@@ -3,108 +3,57 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>Unity WebGL — Embedded + Fullscreen Letterbox 16:9</title>
+  <title>Unity WebGL Embed (Mobile)</title>
   <style>
-    :root { --bg: #0f0f12; --maxw: 900px; }
-    html, body { margin:0; background: var(--bg); color:#e9e9ee; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans'; }
-    .page {
-      padding: 16px; display: grid; gap: 12px; place-content: start center;
-      min-height: 100dvh; box-sizing: border-box;
-    }
-    .blurb { max-width: var(--maxw); opacity:.8; font-size: .95rem; }
-    .unity-shell { width: 100%; max-width: var(--maxw); }
-    .unity-container {
+    :root { --bg: #0f0f12; }
+    html, body { height: 100%; margin: 0; background: var(--bg); }
+    body { display: grid; grid-template-rows: 1fr auto; color: #e9e9ee; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans'; }
+    .unity-wrap {
       position: relative;
-      width: 100%;
-      aspect-ratio: 16/9;          /* Embedded: fixed 16:9 box */
+      width: 100vw;
+      height: 100svh; /* fills safe viewport height on mobile (accounts for URL bar) */
       background: #000;
-      border-radius: 14px;
       overflow: hidden;
-      box-shadow: 0 8px 40px rgba(0,0,0,.35);
-      display: grid;
-      place-items: center;
-    }
-    .unity-stage {                  /* The element we size explicitly (esp. in fullscreen) */
-      position: relative;
-      width: 100%;
-      height: 100%;
-      display: grid;
-      place-items: center;
-      background: #000;             /* Letterbox bars */
     }
     #unity-canvas {
-      display: block;
+      position: absolute; inset: 0;
       width: 100%;
       height: 100%;
+      display: block;
+      /* Prevent gestures interfering with the game */
       touch-action: none;
-      -webkit-user-select: none; user-select: none;
-      outline: none;
-      background: #000;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
     .progress {
-      position:absolute; inset:0; display:grid; place-items:center;
+      position:absolute; inset:0; display:grid; place-items:center; color:#e9e9ee;
     }
     .progress[hidden]{ display:none; }
     .toolbar {
-      display:flex; justify-content:space-between; align-items:center; gap:8px;
-      margin-top: 8px;
+      display:flex; justify-content:space-between; align-items:center;
+      gap:8px; padding: 10px; background: #12141b; border-top: 1px solid #222633;
     }
     .toolbar button {
       padding: 10px 14px; border-radius: 12px; border: 0; background: #1c1f29; color: #e9e9ee;
     }
     .small { opacity:.7; font-size:.9rem; }
-
-    /* Fullscreen rotate hint overlay */
-    .rotate-overlay {
-      position: fixed; inset: 0; display: none;
-      align-items: center; justify-content: center; text-align: center;
-      background: rgba(0,0,0,.8); z-index: 9999; padding: 24px;
-    }
-    .rotate-overlay.active { display: flex; }
-    .rotate-card { max-width: 420px; }
-    .rotate-card h2 { margin: 0 0 8px 0; font-size: 1.1rem; }
-    .rotate-card p { margin: 0; opacity:.85; }
-
-    /* Fullscreen tweaks: container fills viewport; we keep 16:9 by sizing .unity-stage via JS */
-    :fullscreen .unity-container,
-    :-webkit-full-screen .unity-container {
-      border-radius: 0;
-      aspect-ratio: auto; /* Let it stretch; we'll center/fit the 16:9 stage inside */
-    }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="blurb">
-      <strong>Embedded 16:9:</strong> Stays embedded with fixed 16:9. On <em>Fullscreen</em>, it remains 16:9 and adds letterboxing/pillarboxing to fit any screen. Orientation lock attempted on supported browsers.
-    </div>
-
-    <div class="unity-shell">
-      <div class="unity-container" id="unity-container">
-        <div class="unity-stage" id="unity-stage">
-          <canvas id="unity-canvas" tabindex="0"></canvas>
-          <div id="progress" class="progress">Loading… 0%</div>
-        </div>
-      </div>
-      <div class="toolbar">
-        <div class="small">Embedded by default. Fullscreen keeps 16:9 letterboxed.</div>
-        <div>
-          <button id="btn-audio">Enable Audio</button>
-          <button id="btn-fullscreen">Fullscreen</button>
-        </div>
-      </div>
-    </div>
+  <div class="unity-wrap">
+    <canvas id="unity-canvas" tabindex="0"></canvas>
+    <div id="progress" class="progress">Loading… 0%</div>
   </div>
-
-  <div class="rotate-overlay" id="rotate-overlay" role="dialog" aria-live="polite" aria-label="Rotate device">
-    <div class="rotate-card">
-      <h2>Please rotate your device</h2>
-      <p>For the best experience, use landscape while in fullscreen.</p>
+  <div class="toolbar">
+    <div class="small">Mobile embed — DPR capped for performance</div>
+    <div>
+      <button id="btn-audio">Enable Audio</button>
+      <button id="btn-fullscreen">Fullscreen</button>
     </div>
   </div>
 
   <script>
-    // --- Unity Build Paths ---
     const buildUrl  = "Build";
     const loaderUrl = buildUrl + "/CementosArtigasWeb.loader.js";
     const config = {
@@ -115,19 +64,18 @@
       companyName: "MM",
       productName: "Cementos-Artigas-Game",
       productVersion: "1.0",
+      // Mobile perf: clamp devicePixelRatio to reduce fill-rate on high-DPI phones
       devicePixelRatio: Math.min(1.5, window.devicePixelRatio || 1),
       matchWebGLToCanvasSize: true
     };
 
-    const container = document.getElementById("unity-container");
-    const stage = document.getElementById("unity-stage");
     const canvas = document.getElementById("unity-canvas");
     const progressEl = document.getElementById("progress");
     const fsBtn = document.getElementById("btn-fullscreen");
     const audioBtn = document.getElementById("btn-audio");
-    const rotateOverlay = document.getElementById("rotate-overlay");
 
-    const TARGET_ASPECT = 16/9;
+    // Optional: prevent page scroll bounce when interacting
+    document.documentElement.style.overscrollBehavior = "none";
 
     // iOS/Android audio policy: resume AudioContext on a user gesture
     function resumeAudio() {
@@ -140,63 +88,12 @@
       } catch (e) { /* ignore */ }
     }
 
-    // Fullscreen helpers
-    function enterFullscreen(el) {
-      if (el.requestFullscreen) return el.requestFullscreen();
-      if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
-      if (el.msRequestFullscreen) return el.msRequestFullscreen();
-      return Promise.reject(new Error("Fullscreen API not supported"));
+    // Resize handler to keep canvas in sync (mostly handled by matchWebGLToCanvasSize)
+    function handleResize() {
+      // No manual resizing needed; CSS + matchWebGLToCanvasSize handles it.
     }
-    function isFullscreen() {
-      return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
-    }
+    window.addEventListener('resize', handleResize);
 
-    async function lockLandscapeIfPossible() {
-      const so = screen.orientation;
-      if (so && so.lock) {
-        try {
-          await so.lock('landscape');
-          return true;
-        } catch (e) {
-          return false;
-        }
-      }
-      return false;
-    }
-
-    function updateRotateOverlay() {
-      const inFs = isFullscreen();
-      const isLandscape = window.matchMedia('(orientation: landscape)').matches;
-      rotateOverlay.classList.toggle('active', inFs && !isLandscape);
-    }
-
-    // Size the 16:9 stage to "contain" inside its container (letterbox)
-    function fitStageToContainer() {
-      const cw = container.clientWidth;
-      const ch = container.clientHeight;
-      const containerAspect = cw / ch;
-      let w, h;
-      if (containerAspect > TARGET_ASPECT) {
-        h = ch;
-        w = Math.round(h * TARGET_ASPECT);
-      } else {
-        w = cw;
-        h = Math.round(w / TARGET_ASPECT);
-      }
-      stage.style.width = w + "px";
-      stage.style.height = h + "px";
-      canvas.style.width = "100%";
-      canvas.style.height = "100%";
-    }
-
-    ['resize','orientationchange','fullscreenchange','webkitfullscreenchange','msfullscreenchange'].forEach(ev => {
-      window.addEventListener(ev, () => {
-        fitStageToContainer();
-        updateRotateOverlay();
-      });
-    });
-
-    // Boot Unity
     const script = document.createElement("script");
     script.src = loaderUrl;
     script.onload = () => {
@@ -204,22 +101,14 @@
         progressEl.textContent = "Loading… " + Math.round(p * 100) + "%";
       }).then((unityInstance) => {
         progressEl.hidden = true;
-        window.unityInstance = unityInstance;
-        fitStageToContainer(); // initial
-
-        fsBtn.onclick = async () => {
+        fsBtn.onclick = () => {
           resumeAudio();
-          try {
-            await enterFullscreen(container);
-          } catch (e) {
-            if (unityInstance.SetFullscreen) unityInstance.SetFullscreen(1);
-          }
-          await lockLandscapeIfPossible();
-          fitStageToContainer();
-          updateRotateOverlay();
+          // Prefer Unity's fullscreen path
+          if (unityInstance.SetFullscreen) unityInstance.SetFullscreen(1);
+          else if (canvas.requestFullscreen) canvas.requestFullscreen();
         };
-
         audioBtn.onclick = () => resumeAudio();
+        window.unityInstance = unityInstance;
       }).catch((err) => {
         progressEl.textContent = "Failed to load: " + err;
         console.error(err);
